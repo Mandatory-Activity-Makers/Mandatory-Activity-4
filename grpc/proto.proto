@@ -1,0 +1,7 @@
+syntax = "proto3";
+option go_package = "CsService/grpc/proto";
+
+service CsService {
+    rpc Request (Empty) returns (Empty) {};
+    rpc Reply   (Empty) returns (Empty) {};
+}
