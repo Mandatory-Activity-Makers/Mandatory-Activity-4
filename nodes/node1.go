@@ -37,7 +37,7 @@ func NewNode(id int64, port string) *Node {
 // Start() returns nil if the server startup
 // did not create any errors
 //
-// # The function is only accessible by Node structs
+// The function is only accessible by Node structs.
 //
 // It creates a server stump where it listens to
 // incoming dials from other clients
