@@ -2,6 +2,7 @@ package main
 
 import (
 	proto "CsService/grpc"
+	"context"
 
 	"log"
 	"net"
@@ -79,4 +80,16 @@ func (n *Node) DialOtherNodes(peers map[int64]string) error {
 
 		n.clients[peerID] = client
 	}
+	return nil
+}
+
+func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.NodeResponse, error) {
+	// Your Ricart-Agrawala logic here
+	// This will be the same for all nodes
+
+	return &proto.NodeResponse{
+		PermissionGranted: true,
+		NodeId:            n.node_id,
+		SeqNr:             req.SeqNr,
+	}, nil
 }
