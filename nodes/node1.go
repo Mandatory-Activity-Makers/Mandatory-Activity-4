@@ -20,6 +20,9 @@ type Node struct {
 	clients map[int64]proto.CsServiceClient
 }
 
+// NewNode(...) returns a new Node struct.
+//
+// Makes for easier struct initialization.
 func NewNode(id int64, port string) *Node {
 	node := &Node{
 		node_id: id,
@@ -31,6 +34,14 @@ func NewNode(id int64, port string) *Node {
 	return node
 }
 
+// Start() returns nil if the server startup
+// did not create any errors
+//
+// # The function is only accessible by Node structs
+//
+// It creates a server stump where it listens to
+// incoming dials from other clients
+// and also registers it as a server.
 func (n *Node) Start() error {
 	lis, err := net.Listen("tcp", n.port)
 	if err != nil {
