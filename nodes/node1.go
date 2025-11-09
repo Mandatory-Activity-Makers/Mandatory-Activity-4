@@ -7,6 +7,7 @@ import (
 	"net"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type Node struct {
@@ -20,7 +21,7 @@ type Node struct {
 	clients map[int64]proto.CsServiceClient
 }
 
-// NewNode(...) returns a new Node struct.
+// NewNode returns a new Node struct.
 //
 // Makes for easier struct initialization.
 func NewNode(id int64, port string) *Node {
@@ -34,7 +35,7 @@ func NewNode(id int64, port string) *Node {
 	return node
 }
 
-// Start() returns nil if the server startup
+// StartServer returns nil if the server startup
 // did not create any errors
 //
 // The function is only accessible by Node structs.
@@ -42,7 +43,7 @@ func NewNode(id int64, port string) *Node {
 // It creates a server stump where it listens to
 // incoming dials from other clients
 // and also registers it as a server.
-func (n *Node) Start() error {
+func (n *Node) StartServer() error {
 	lis, err := net.Listen("tcp", n.port)
 	if err != nil {
 		return err
@@ -57,4 +58,25 @@ func (n *Node) Start() error {
 	}()
 
 	return nil
+}
+
+// DialOtherNodes returns nil if no dials were faulty
+//
+// # First it creates connection (conn) with the server
+//
+// # Secondly it creates a new client from that connection
+//
+// # Thirdly it stores the client value in the Node's map
+func (n *Node) DialOtherNodes(peers map[int64]string) error {
+	for peerID, address := range peers {
+
+		conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return err
+		}
+
+		client := proto.NewCsServiceClient(conn)
+
+		n.clients[peerID] = client
+	}
 }
