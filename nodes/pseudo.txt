@@ -1,0 +1,98 @@
+// Ricart-Agrawala Distributed Mutual Exclusion Algorithm
+// Each process maintains its own state and logical clock
+
+// Global Variables for Process Pi
+var state: {RELEASED, WANTED, HELD}  // Current state of the process
+var logical_clock: integer           // Lamport's logical clock
+var reply_deferred: set of process_ids // Queue of deferred replies
+var reply_count: integer             // Count of received replies
+var num_processes: integer           // Total number of processes in system
+
+// Initialize
+procedure Initialize()
+    state := RELEASED
+    logical_clock := 0
+    reply_deferred := empty_set
+    reply_count := 0
+end procedure
+
+// Request Critical Section
+procedure RequestCriticalSection()
+    state := WANTED
+    logical_clock := logical_clock + 1
+    request_timestamp := logical_clock
+    reply_count := 0
+    
+    // Send REQUEST(timestamp, process_id) to all other processes
+    for each process Pj where j ≠ i do
+        send REQUEST(request_timestamp, i) to Pj
+    end for
+    
+    // Wait until replies received from all processes
+    wait until (reply_count == num_processes - 1)
+    
+    state := HELD
+    // Enter critical section
+end procedure
+
+// Release Critical Section
+procedure ReleaseCriticalSection()
+    state := RELEASED
+    
+    // Send deferred REPLY messages
+    for each process_id in reply_deferred do
+        send REPLY to process_id
+    end for
+    
+    reply_deferred := empty_set
+    // Exit critical section
+end procedure
+
+// Handle incoming REQUEST message
+procedure OnReceiveRequest(timestamp_j, process_id_j)
+    logical_clock := max(logical_clock, timestamp_j) + 1
+    
+    if (state == HELD) OR 
+       (state == WANTED AND (request_timestamp, i) < (timestamp_j, process_id_j)) then
+        // Defer the reply
+        add process_id_j to reply_deferred
+    else
+        // Send immediate reply
+        send REPLY to process_id_j
+    end if
+end procedure
+
+// Handle incoming REPLY message
+procedure OnReceiveReply(process_id_j)
+    reply_count := reply_count + 1
+end procedure
+
+// Comparison for request priority (lower timestamp or lower process_id wins)
+function CompareRequests(timestamp1, pid1, timestamp2, pid2): boolean
+    if timestamp1 < timestamp2 then
+        return true
+    else if timestamp1 == timestamp2 AND pid1 < pid2 then
+        return true
+    else
+        return false
+    end if
+end function
+
+// Main execution loop
+procedure Main()
+    Initialize()
+    
+    loop forever
+        // Non-critical section work
+        DoNonCriticalWork()
+        
+        // Request and enter critical section
+        RequestCriticalSection()
+        
+        // Critical section work
+        DoCriticalWork()
+        
+        // Release critical section
+        ReleaseCriticalSection()
+    end loop
+end procedure

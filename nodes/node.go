@@ -1,9 +1,12 @@
 package main
 
 import (
+	"fmt"
+	"sync"
+	"time"
+
 	proto "CsService/grpc"
 	"context"
-
 	"log"
 	"net"
 
@@ -13,22 +16,38 @@ import (
 
 type Node struct {
 	proto.UnimplementedCsServiceServer
+	// CONSTANT
+	node_id int64 // This node's unique number
+	N       int   // The number of nodes in the network
 
-	node_id int64
-	seq_nr  int64
-	port    string
+	// INTEGER
+	Our_Sequence_Number     int64 // The sequence number chosen by a request originating at this node
+	Highest_Sequence_Number int   // initial (0) The highest sequence number seen in any REQUEST message sent or received
+	Outstanding_Reply_Count int   // The number of REPLY messages still expected
 
+	// BOOLEAN
+	Requesting_Critical_Section bool   // initial (FALSE) TRUE when this node is requesting access to its critical section
+	Reply_Deferred              []bool // [1:N] initial (FALSE) Reply_Deferred [j] is TRUE when this node is deferring a REPLY to j's REQUEST message
+
+	mu      sync.Mutex
+	port    string // localhost port
 	server  *grpc.Server
-	clients map[int64]proto.CsServiceClient
+	clients map[int]proto.CsServiceClient
 }
 
 // NewNode returns a new Node struct.
 //
 // Makes for easier struct initialization.
-func NewNode(id int64, port string) *Node {
+func NewNode(id int64, N int, port string) *Node {
 	node := &Node{
-		node_id: id,
-		seq_nr:  0,
+		node_id:                     id,
+		N:                           N,
+		Our_Sequence_Number:         0,
+		Highest_Sequence_Number:     0,
+		Outstanding_Reply_Count:     N - 1,
+		Requesting_Critical_Section: false,
+		Reply_Deferred:              make([]bool, N),
+
 		port:    port,
 		server:  grpc.NewServer(),
 		clients: make(map[int64]proto.CsServiceClient),
@@ -68,7 +87,7 @@ func (n *Node) StartServer() error {
 // # Secondly it creates a new client from that connection
 //
 // # Thirdly it stores the client value in the Node's map
-func (n *Node) DialOtherNodes(peers map[int64]string) error {
+func (n *Node) DialOtherNodes(peers map[int]string) error {
 	for peerID, address := range peers {
 
 		conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -83,13 +102,49 @@ func (n *Node) DialOtherNodes(peers map[int64]string) error {
 	return nil
 }
 
-func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.NodeResponse, error) {
-	// Your Ricart-Agrawala logic here
-	// This will be the same for all nodes
+func (n *Node) RequestCriticalSection() {
+	n.Requesting_Critical_Section = true
+	n.Our_Sequence_Number++
+	// Send to all other nodes
+	for peerID, client := range n.clients {
+		resp, err := client.Request(context.Background(), &proto.NodeRequest{
+			NodeId: n.node_id,
+			SeqNr:  n.Our_Sequence_Number,
+		})
+		fmt.Print("Node %s is Requesting CS from Node %s at Time %d", n.node_id, peerID, n.Our_Sequence_Number)
+		if err == nil && resp.PermissionGranted == true {
+			n.Outstanding_Reply_Count-- // Got a reply!
+		}
+	}
 
-	return &proto.NodeResponse{
-		PermissionGranted: true,
-		NodeId:            n.node_id,
-		SeqNr:             req.SeqNr,
-	}, nil
+	if 0 == n.Outstanding_Reply_Count { // 2 is the max nr of replies (hardcoded)
+		fmt.Printf("Node %s accessed the critical section", n.node_id) // write to txt file new line (not required)
+		time.Sleep(1000)
+	}
+}
+
+func (n *Node) ReleaseCriticalSection() {
+	n.Requesting_Critical_Section = false
+	for j := 1; j < n.N; j++ {
+		if n.Reply_Deferred[j] {
+			n.Reply_Deferred[j] = false
+
+		}
+	}
+}
+
+func (n *Node) Send_Message(ctx context.Context, res *proto.NodeResponse, id int) {
+	client := n.clients[id]
+}
+
+func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.NodeResponse, error) {
+	if !n.Requesting_Critical_Section || req.SeqNr < n.Our_Sequence_Number && n.Requesting_Critical_Section || req.SeqNr == n.Our_Sequence_Number && req.NodeId < n.node_id {
+		// reply OK
+		return &proto.NodeResponse{
+			PermissionGranted: true,
+			NodeId:            n.node_id,
+			SeqNr:             req.SeqNr,
+		}, nil
+	}
+
 }
