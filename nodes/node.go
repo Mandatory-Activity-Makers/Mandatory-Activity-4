@@ -111,8 +111,11 @@ func (n *Node) DialOtherNodes(peers map[int]string) error {
 }
 
 func (n *Node) RequestCriticalSection() {
+	n.mu.Lock()
 	n.Requesting_Critical_Section = true
+	n.Outstanding_Reply_Count = n.N - 1
 	n.Our_Sequence_Number++
+	n.mu.Unlock()
 	// Send to all other nodes
 	for peerID, client := range n.clients {
 		resp, err := client.Request(context.Background(), &proto.NodeRequest{
@@ -125,9 +128,10 @@ func (n *Node) RequestCriticalSection() {
 		}
 	}
 
-	if 0 == n.Outstanding_Reply_Count { // 2 is the max nr of replies (hardcoded)
+	if n.Outstanding_Reply_Count == 0 { // 2 is the max nr of replies (hardcoded)
 		fmt.Printf("Node %s accessed the critical section", n.node_id) // write to txt file new line (not required)
 		time.Sleep(1000)
+		n.ReleaseCriticalSection() // release the critical section after accessing it
 	}
 }
 
@@ -142,8 +146,28 @@ func (n *Node) ReleaseCriticalSection() {
 }
 
 func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.NodeResponse, error) {
-	if !n.Requesting_Critical_Section || req.SeqNr < n.Our_Sequence_Number && n.Requesting_Critical_Section || req.SeqNr == n.Our_Sequence_Number && req.NodeId < n.node_id {
+	n.mu.Lock()
+	requesting := n.Requesting_Critical_Section
+	ourSeq := n.Our_Sequence_Number
+	ourID := n.node_id
+	n.mu.Unlock()
+
+	if !requesting ||
+		req.SeqNr < ourSeq && requesting ||
+		req.SeqNr == ourSeq && req.NodeId < ourID {
 		// reply OK
+		return &proto.NodeResponse{
+			PermissionGranted: true,
+			NodeId:            n.node_id,
+			SeqNr:             req.SeqNr,
+		}, nil
+	} else {
+		n.mu.Lock()
+		n.Reply_Deferred[req.NodeId] = true // defers the incoming requesting node
+		n.mu.Unlock()
+
+		<-n.reply_channels[int(req.NodeId)] // blocks until it receives a signal from requesting node
+
 		return &proto.NodeResponse{
 			PermissionGranted: true,
 			NodeId:            n.node_id,
