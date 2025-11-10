@@ -12,7 +12,6 @@ message NodeResponse {
     int64 seq_nr  = 3; // requesting node's sequence number
 }
 
-
 service CsService {
     rpc Request (NodeRequest) returns (NodeResponse) {};
 }
