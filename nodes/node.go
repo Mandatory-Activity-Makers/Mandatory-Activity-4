@@ -50,7 +50,7 @@ func NewNode(id int64, N int, port string) *Node {
 
 		port:    port,
 		server:  grpc.NewServer(),
-		clients: make(map[int64]proto.CsServiceClient),
+		clients: make(map[int]proto.CsServiceClient),
 	}
 	return node
 }
@@ -134,7 +134,7 @@ func (n *Node) ReleaseCriticalSection() {
 }
 
 func (n *Node) Send_Message(ctx context.Context, res *proto.NodeResponse, id int) {
-	client := n.clients[id]
+
 }
 
 func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.NodeResponse, error) {
