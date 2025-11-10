@@ -26,8 +26,9 @@ type Node struct {
 	Outstanding_Reply_Count int   // The number of REPLY messages still expected
 
 	// BOOLEAN
-	Requesting_Critical_Section bool   // initial (FALSE) TRUE when this node is requesting access to its critical section
-	Reply_Deferred              []bool // [1:N] initial (FALSE) Reply_Deferred [j] is TRUE when this node is deferring a REPLY to j's REQUEST message
+	Requesting_Critical_Section bool              // initial (FALSE) TRUE when this node is requesting access to its critical section
+	Reply_Deferred              []bool            // [1:N] initial (FALSE) Reply_Deferred [j] is TRUE when this node is deferring a REPLY to j's REQUEST message
+	reply_channels              map[int]chan bool // channel for each node that might be deferred
 
 	mu      sync.Mutex
 	port    string // localhost port
@@ -48,9 +49,16 @@ func NewNode(id int64, N int, port string) *Node {
 		Requesting_Critical_Section: false,
 		Reply_Deferred:              make([]bool, N),
 
-		port:    port,
-		server:  grpc.NewServer(),
-		clients: make(map[int]proto.CsServiceClient),
+		port:           port,
+		server:         grpc.NewServer(),
+		clients:        make(map[int]proto.CsServiceClient),
+		reply_channels: make(map[int]chan bool),
+	}
+	// Pre-create a channel for each possible node
+	for i := 1; i <= N; i++ {
+		if int64(i) != id { // Don't create for yourself
+			node.reply_channels[int(i)] = make(chan bool, 1) // buffered
+		}
 	}
 	return node
 }
@@ -128,12 +136,16 @@ func (n *Node) ReleaseCriticalSection() {
 	for j := 1; j < n.N; j++ {
 		if n.Reply_Deferred[j] {
 			n.Reply_Deferred[j] = false
-
+			n.reply_channels[j] <- true // send a reply to node j and release the critical sectiong
 		}
 	}
 }
 
 func (n *Node) Send_Message(ctx context.Context, res *proto.NodeResponse, id int) {
+
+}
+
+func (n *Node) Reply(ctx context.Context, rep *proto.NodeResponse) {
 
 }
 
