@@ -20,7 +20,6 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	CsService_Request_FullMethodName = "/CsService/Request"
-	CsService_Reply_FullMethodName   = "/CsService/Reply"
 )
 
 // CsServiceClient is the client API for CsService service.
@@ -28,7 +27,6 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type CsServiceClient interface {
 	Request(ctx context.Context, in *NodeRequest, opts ...grpc.CallOption) (*NodeResponse, error)
-	Reply(ctx context.Context, in *NodeResponse, opts ...grpc.CallOption) (*Empty, error)
 }
 
 type csServiceClient struct {
@@ -49,22 +47,11 @@ func (c *csServiceClient) Request(ctx context.Context, in *NodeRequest, opts ...
 	return out, nil
 }
 
-func (c *csServiceClient) Reply(ctx context.Context, in *NodeResponse, opts ...grpc.CallOption) (*Empty, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Empty)
-	err := c.cc.Invoke(ctx, CsService_Reply_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // CsServiceServer is the server API for CsService service.
 // All implementations must embed UnimplementedCsServiceServer
 // for forward compatibility.
 type CsServiceServer interface {
 	Request(context.Context, *NodeRequest) (*NodeResponse, error)
-	Reply(context.Context, *NodeResponse) (*Empty, error)
 	mustEmbedUnimplementedCsServiceServer()
 }
 
@@ -77,9 +64,6 @@ type UnimplementedCsServiceServer struct{}
 
 func (UnimplementedCsServiceServer) Request(context.Context, *NodeRequest) (*NodeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Request not implemented")
-}
-func (UnimplementedCsServiceServer) Reply(context.Context, *NodeResponse) (*Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Reply not implemented")
 }
 func (UnimplementedCsServiceServer) mustEmbedUnimplementedCsServiceServer() {}
 func (UnimplementedCsServiceServer) testEmbeddedByValue()                   {}
@@ -120,24 +104,6 @@ func _CsService_Request_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
-func _CsService_Reply_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(NodeResponse)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(CsServiceServer).Reply(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: CsService_Reply_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(CsServiceServer).Reply(ctx, req.(*NodeResponse))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // CsService_ServiceDesc is the grpc.ServiceDesc for CsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -148,10 +114,6 @@ var CsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Request",
 			Handler:    _CsService_Request_Handler,
-		},
-		{
-			MethodName: "Reply",
-			Handler:    _CsService_Reply_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

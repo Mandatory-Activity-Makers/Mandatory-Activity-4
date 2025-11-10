@@ -141,14 +141,6 @@ func (n *Node) ReleaseCriticalSection() {
 	}
 }
 
-func (n *Node) Send_Message(ctx context.Context, res *proto.NodeResponse, id int) {
-
-}
-
-func (n *Node) Reply(ctx context.Context, rep *proto.NodeResponse) {
-
-}
-
 func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.NodeResponse, error) {
 	if !n.Requesting_Critical_Section || req.SeqNr < n.Our_Sequence_Number && n.Requesting_Critical_Section || req.SeqNr == n.Our_Sequence_Number && req.NodeId < n.node_id {
 		// reply OK
