@@ -14,25 +14,32 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// Node represents a single process participating in the Ricart-Agrawala mutual exclusion algorithm.
 type Node struct {
 	proto.UnimplementedCsServiceServer
-	node_id int64
-	N       int
+	// CONSTANT
+	node_id int64 // This node's unique number
+	N       int   // The number of nodes in the network
 
-	Our_Sequence_Number     int64
-	Highest_Sequence_Number int
-	Outstanding_Reply_Count int
+	// INTEGER
+	Our_Sequence_Number     int64 // The sequence number chosen by a request originating at this node
+	Highest_Sequence_Number int   // initial (0) The highest sequence number seen in any REQUEST message sent or received
+	Outstanding_Reply_Count int   // The number of REPLY messages still expected
 
-	Requesting_Critical_Section bool
-	Reply_Deferred              []bool
-	reply_channels              map[int]chan bool
+	// BOOLEAN
+	Requesting_Critical_Section bool              // initial (FALSE) TRUE when this node is requesting access to its critical section
+	Reply_Deferred              []bool            // [1:N] initial (FALSE) Reply_Deferred[j] is TRUE when this node is deferring a REPLY to j's REQUEST message
+	reply_channels              map[int]chan bool // channel for each node that might be deferred
 
 	mu      sync.Mutex
-	port    string
+	port    string // localhost port
 	server  *grpc.Server
 	clients map[int]proto.CsServiceClient
 }
 
+// NewNode returns a new Node struct.
+//
+// Makes for easier struct initialization.
 func NewNode(id int64, N int, port string) *Node {
 	node := &Node{
 		node_id:                     id,
@@ -49,9 +56,10 @@ func NewNode(id int64, N int, port string) *Node {
 		reply_channels: make(map[int]chan bool),
 	}
 
+	// Pre-create a channel for each possible node
 	for i := 1; i <= N; i++ {
-		if int64(i) != id {
-			node.reply_channels[int(i)] = make(chan bool, 1)
+		if int64(i) != id { // Don't create for yourself
+			node.reply_channels[int(i)] = make(chan bool, 1) // buffered
 		}
 	}
 
@@ -59,6 +67,14 @@ func NewNode(id int64, N int, port string) *Node {
 	return node
 }
 
+// StartServer returns nil if the server startup
+// did not create any errors
+//
+// The function is only accessible by Node structs.
+//
+// It creates a server stump where it listens to
+// incoming dials from other clients
+// and also registers it as a server.
 func (n *Node) StartServer() error {
 	fmt.Printf("[SERVER] Node %d starting gRPC server on %s\n", n.node_id, n.port)
 	lis, err := net.Listen("tcp", n.port)
@@ -77,6 +93,13 @@ func (n *Node) StartServer() error {
 	return nil
 }
 
+// DialOtherNodes returns nil if no dials were faulty
+//
+// # First it creates connection (conn) with the server
+//
+// # Secondly it creates a new client from that connection
+//
+// # Thirdly it stores the client value in the Node's map
 func (n *Node) DialOtherNodes(peers map[int]string) error {
 	fmt.Printf("[DIAL] Node %d dialing other nodes...\n", n.node_id)
 	for peerID, address := range peers {
@@ -95,16 +118,23 @@ func (n *Node) DialOtherNodes(peers map[int]string) error {
 	return nil
 }
 
+// RequestCriticalSection initiates a request to enter
+// the critical section according to the Ricart-Agrawala algorithm.
+//
+// It broadcasts REQUEST messages to all other nodes and
+// waits for all REPLY messages before entering the CS.
 func (n *Node) RequestCriticalSection() {
 	n.mu.Lock()
 	n.Requesting_Critical_Section = true
 	n.Outstanding_Reply_Count = n.N - 1
+	// CHANGE THESE TWO LINES:
 	n.Our_Sequence_Number = int64(n.Highest_Sequence_Number) + 1
 	n.Highest_Sequence_Number = int(n.Our_Sequence_Number)
-	ourSeq := n.Our_Sequence_Number
+	ourSeq := n.Our_Sequence_Number // Save for use outside lock
 	fmt.Printf("[REQUEST] Node %d requesting CS (Seq=%d)\n", n.node_id, ourSeq)
 	n.mu.Unlock()
 
+	// Send to all other nodes
 	for peerID, client := range n.clients {
 		fmt.Printf("[SEND] Node %d sending REQUEST to Node %d (Seq=%d)\n", n.node_id, peerID, ourSeq)
 		resp, err := client.Request(context.Background(), &proto.NodeRequest{
@@ -126,6 +156,7 @@ func (n *Node) RequestCriticalSection() {
 		}
 	}
 
+	// Wait for all replies
 	for {
 		n.mu.Lock()
 		count := n.Outstanding_Reply_Count
@@ -137,13 +168,16 @@ func (n *Node) RequestCriticalSection() {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	if n.Outstanding_Reply_Count == 0 {
+	if n.Outstanding_Reply_Count == 0 { // 2 is the max nr of replies (hardcoded)
+		// Enter CS (ONLY ONCE!)
 		fmt.Printf("[ENTER] Node %d entering Critical Section (Seq=%d)\n", n.node_id, n.Our_Sequence_Number)
 		time.Sleep(1 * time.Second)
-		n.ReleaseCriticalSection()
+		n.ReleaseCriticalSection() // release the critical section after accessing it
 	}
 }
 
+// ReleaseCriticalSection resets the requesting flag,
+// and sends deferred REPLY messages to nodes that were waiting.
 func (n *Node) ReleaseCriticalSection() {
 	fmt.Printf("[RELEASE] Node %d releasing Critical Section\n", n.node_id)
 	n.mu.Lock()
@@ -160,6 +194,10 @@ func (n *Node) ReleaseCriticalSection() {
 	fmt.Printf("[RELEASE] Node %d finished releasing Critical Section\n", n.node_id)
 }
 
+// Request handles an incoming REQUEST message from another node.
+//
+// It decides whether to immediately grant permission
+// or defer the REPLY based on the Ricart-Agrawala conditions.
 func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.NodeResponse, error) {
 	fmt.Printf("[RECV] Node %d received REQUEST from Node %d (Seq=%d)\n", n.node_id, req.NodeId, req.SeqNr)
 
@@ -175,6 +213,7 @@ func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.Node
 	if !requesting ||
 		req.SeqNr < ourSeq && requesting ||
 		req.SeqNr == ourSeq && req.NodeId < ourID {
+		// reply OK
 		fmt.Printf("[GRANT] Node %d granting REPLY to Node %d immediately\n", n.node_id, req.NodeId)
 		return &proto.NodeResponse{
 			PermissionGranted: true,
@@ -184,10 +223,11 @@ func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.Node
 	} else {
 		fmt.Printf("[DEFER] Node %d deferring REPLY to Node %d\n", n.node_id, req.NodeId)
 		n.mu.Lock()
-		n.Reply_Deferred[req.NodeId] = true
+		n.Reply_Deferred[req.NodeId] = true // defers the incoming requesting node
 		n.mu.Unlock()
 
-		<-n.reply_channels[int(req.NodeId)]
+		<-n.reply_channels[int(req.NodeId)] // blocks until it receives a signal from requesting node
+
 		fmt.Printf("[SEND-DEFERRED] Node %d sending deferred REPLY to Node %d\n", n.node_id, req.NodeId)
 		return &proto.NodeResponse{
 			PermissionGranted: true,
@@ -201,6 +241,7 @@ var wg sync.WaitGroup
 
 func main() {
 	fmt.Println("[MAIN] Initializing nodes...")
+	// Create 3 nodes
 	node1 := NewNode(1, 3, "localhost:5001")
 	node2 := NewNode(2, 3, "localhost:5002")
 	node3 := NewNode(3, 3, "localhost:5003")
@@ -222,28 +263,31 @@ func main() {
 	time.Sleep(2 * time.Second)
 	fmt.Println("[MAIN] All servers started and connected.")
 
+	// FIXED WaitGroup usage:
 	var wg sync.WaitGroup
-	wg.Add(3)
-
+	nr_of_times_entering_cs := 1 // change this to test longer logs
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 3; i++ {
+		for i := 0; i < nr_of_times_entering_cs; i++ {
 			node1.RequestCriticalSection()
 			time.Sleep(time.Second * 2)
 		}
 	}()
 
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 3; i++ {
+		for i := 0; i < nr_of_times_entering_cs; i++ {
 			node2.RequestCriticalSection()
 			time.Sleep(time.Second * 2)
 		}
 	}()
 
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 3; i++ {
+		for i := 0; i < nr_of_times_entering_cs; i++ {
 			node3.RequestCriticalSection()
 			time.Sleep(time.Second * 2)
 		}
