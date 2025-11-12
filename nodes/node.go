@@ -127,22 +127,19 @@ func (n *Node) RequestCriticalSection() {
 	n.mu.Lock()
 	n.Requesting_Critical_Section = true
 	n.Outstanding_Reply_Count = n.N - 1
-	// CHANGE THESE TWO LINES:
 	n.Our_Sequence_Number = int64(n.Highest_Sequence_Number) + 1
 	n.Highest_Sequence_Number = int(n.Our_Sequence_Number)
 	ourSeq := n.Our_Sequence_Number // Save for use outside lock
-	fmt.Printf("[REQUEST] Node %d requesting CS (Seq=%d)\n", n.node_id, ourSeq)
 	n.mu.Unlock()
 
 	// Send to all other nodes
 	for peerID, client := range n.clients {
-		fmt.Printf("[SEND] Node %d sending REQUEST to Node %d (Seq=%d)\n", n.node_id, peerID, ourSeq)
+		fmt.Printf("[REQUEST] Node %d requesting CS from Node %d, (Seq=%d)\n", n.node_id, peerID, ourSeq)
 		resp, err := client.Request(context.Background(), &proto.NodeRequest{
 			NodeId: n.node_id,
 			SeqNr:  ourSeq,
 		})
 		n.mu.Lock()
-		fmt.Printf("[STATE] Node %d awaiting REPLY from Node %d\n", n.node_id, peerID)
 		time.Sleep(time.Second * 1)
 		n.mu.Unlock()
 		if err == nil && resp.PermissionGranted == true {
@@ -170,7 +167,7 @@ func (n *Node) RequestCriticalSection() {
 
 	if n.Outstanding_Reply_Count == 0 { // 2 is the max nr of replies (hardcoded)
 		// Enter CS (ONLY ONCE!)
-		fmt.Printf("[ENTER] Node %d entering Critical Section (Seq=%d)\n", n.node_id, n.Our_Sequence_Number)
+		fmt.Printf("[ENTER] Node %d entering Critical Section, (Seq=%d)\n", n.node_id, n.Our_Sequence_Number)
 		time.Sleep(1 * time.Second)
 		n.ReleaseCriticalSection() // release the critical section after accessing it
 	}
@@ -179,19 +176,18 @@ func (n *Node) RequestCriticalSection() {
 // ReleaseCriticalSection resets the requesting flag,
 // and sends deferred REPLY messages to nodes that were waiting.
 func (n *Node) ReleaseCriticalSection() {
-	fmt.Printf("[RELEASE] Node %d releasing Critical Section\n", n.node_id)
 	n.mu.Lock()
 	n.Requesting_Critical_Section = false
 	n.mu.Unlock()
 
 	for j := 1; j <= n.N; j++ {
 		if n.Reply_Deferred[j] {
-			fmt.Printf("[DEFERRED] Node %d sending deferred REPLY to Node %d\n", n.node_id, j)
+			fmt.Printf("[DEFERRED] Node %d sending REPLY to deferred Node %d\n", n.node_id, j)
 			n.Reply_Deferred[j] = false
 			n.reply_channels[j] <- true
 		}
 	}
-	fmt.Printf("[RELEASE] Node %d finished releasing Critical Section\n", n.node_id)
+	fmt.Printf("[RELEASE] Node %d released Critical Section\n", n.node_id)
 }
 
 // Request handles an incoming REQUEST message from another node.
@@ -199,7 +195,7 @@ func (n *Node) ReleaseCriticalSection() {
 // It decides whether to immediately grant permission
 // or defer the REPLY based on the Ricart-Agrawala conditions.
 func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.NodeResponse, error) {
-	fmt.Printf("[RECV] Node %d received REQUEST from Node %d (Seq=%d)\n", n.node_id, req.NodeId, req.SeqNr)
+	fmt.Printf("[RECV] Node %d received REQUEST from Node %d, (Seq=%d)\n", n.node_id, req.NodeId, req.SeqNr)
 
 	n.mu.Lock()
 	if req.SeqNr > int64(n.Highest_Sequence_Number) {
@@ -262,8 +258,8 @@ func main() {
 
 	time.Sleep(2 * time.Second)
 	fmt.Println("[MAIN] All servers started and connected.")
+	fmt.Println("=========================================\nRUNNING ALGORITHM\n=========================================")
 
-	// FIXED WaitGroup usage:
 	var wg sync.WaitGroup
 	nr_of_times_entering_cs := 1 // change this to test longer logs
 	wg.Add(1)
