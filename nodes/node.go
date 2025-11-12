@@ -14,6 +14,18 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// ANSI color codes
+const (
+	ColorReset  = "\033[0m"
+	ColorRed    = "\033[31m"
+	ColorGreen  = "\033[32m"
+	ColorYellow = "\033[33m"
+	ColorBlue   = "\033[34m"
+	ColorPurple = "\033[35m"
+	ColorCyan   = "\033[36m"
+	ColorWhite  = "\033[37m"
+)
+
 // Node represents a single process participating in the Ricart-Agrawala mutual exclusion algorithm.
 type Node struct {
 	proto.UnimplementedCsServiceServer
@@ -37,10 +49,55 @@ type Node struct {
 	clients map[int]proto.CsServiceClient
 }
 
-// Print with sleep timer to simulate running processes.
+// Helper function for Colors
+func containsPrefix(msg, prefix string) bool {
+	return len(msg) >= len(prefix) && msg[:len(prefix)] == prefix
+}
+
+// logPrint prints color-coded log messages with a short delay to simulate real process timing.
 func logPrint(format string, a ...interface{}) {
-	fmt.Printf(format, a...)
-	time.Sleep(500 * time.Millisecond) // Adjust delay as needed
+	msg := fmt.Sprintf(format, a...)
+
+	// Assign unique colors for each tag
+	switch {
+	case containsPrefix(msg, "[ERROR]"):
+		msg = ColorRed + msg + ColorReset
+	case containsPrefix(msg, "[REPLY]"):
+		msg = "\033[38;5;46m" + msg + ColorReset // bright green
+	case containsPrefix(msg, "[REQUEST]"):
+		msg = "\033[38;5;39m" + msg + ColorReset // bright blue-cyan
+	case containsPrefix(msg, "[GRANT]"):
+		msg = "\033[38;5;208m" + msg + ColorReset // orange
+	case containsPrefix(msg, "[DEFER]"):
+		msg = "\033[38;5;226m" + msg + ColorReset // yellow
+	case containsPrefix(msg, "[DEFERRED]"):
+		msg = "\033[38;5;220m" + msg + ColorReset // gold
+	case containsPrefix(msg, "[SEND-DEFERRED]"):
+		msg = "\033[38;5;51m" + msg + ColorReset // aqua blue
+	case containsPrefix(msg, "[ENTER]"):
+		msg = "\033[38;5;141m" + msg + ColorReset // light purple
+	case containsPrefix(msg, "[RELEASE]"):
+		msg = "\033[38;5;201m" + msg + ColorReset // pink
+	case containsPrefix(msg, "[SERVER]"):
+		msg = "\033[38;5;33m" + msg + ColorReset // deep blue
+	case containsPrefix(msg, "[DIAL]"):
+		msg = "\033[38;5;45m" + msg + ColorReset // teal
+	case containsPrefix(msg, "[INIT]"):
+		msg = "\033[38;5;14m" + msg + ColorReset // sky blue
+	case containsPrefix(msg, "[MAIN]"):
+		msg = "\033[38;5;240m" + msg + ColorReset // gray
+	case containsPrefix(msg, "[RECV]"):
+		msg = "\033[38;5;202m" + msg + ColorReset // bright orange-red
+	default:
+		msg = ColorWhite + msg + ColorReset // fallback for untagged messages
+	}
+
+	// Ensure newline between messages
+	if len(msg) == 0 || msg[len(msg)-1] != '\n' {
+		msg += "\n"
+	}
+	fmt.Print(msg)
+	time.Sleep(100 * time.Millisecond)
 }
 
 // NewNode returns a new Node struct.
