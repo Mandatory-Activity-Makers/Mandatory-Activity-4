@@ -37,6 +37,12 @@ type Node struct {
 	clients map[int]proto.CsServiceClient
 }
 
+// Print with sleep timer to simulate running processes.
+func logPrint(format string, a ...interface{}) {
+	fmt.Printf(format, a...)
+	time.Sleep(500 * time.Millisecond) // Adjust delay as needed
+}
+
 // NewNode returns a new Node struct.
 //
 // Makes for easier struct initialization.
@@ -63,7 +69,7 @@ func NewNode(id int64, N int, port string) *Node {
 		}
 	}
 
-	fmt.Printf("[INIT] Node %d initialized with port %s and %d total nodes\n", node.node_id, port, N)
+	logPrint("[INIT] Node %d initialized with port %s and %d total nodes\n", node.node_id, port, N)
 	return node
 }
 
@@ -76,7 +82,7 @@ func NewNode(id int64, N int, port string) *Node {
 // incoming dials from other clients
 // and also registers it as a server.
 func (n *Node) StartServer() error {
-	fmt.Printf("[SERVER] Node %d starting gRPC server on %s\n", n.node_id, n.port)
+	logPrint("[SERVER] Node %d starting gRPC server on %s\n", n.node_id, n.port)
 	lis, err := net.Listen("tcp", n.port)
 	if err != nil {
 		return err
@@ -85,7 +91,7 @@ func (n *Node) StartServer() error {
 	proto.RegisterCsServiceServer(n.server, n)
 
 	go func() {
-		fmt.Printf("[SERVER] Node %d listening for incoming connections...\n", n.node_id)
+		logPrint("[SERVER] Node %d listening for incoming connections...\n", n.node_id)
 		if err := n.server.Serve(lis); err != nil {
 			log.Fatalf("Node %d server error: %v", n.node_id, err)
 		}
@@ -101,20 +107,20 @@ func (n *Node) StartServer() error {
 //
 // # Thirdly it stores the client value in the Node's map
 func (n *Node) DialOtherNodes(peers map[int]string) error {
-	fmt.Printf("[DIAL] Node %d dialing other nodes...\n", n.node_id)
+	logPrint("[DIAL] Node %d dialing other nodes...\n", n.node_id)
 	for peerID, address := range peers {
-		fmt.Printf("[DIAL] Node %d attempting connection to Node %d at %s\n", n.node_id, peerID, address)
+		logPrint("[DIAL] Node %d attempting connection to Node %d at %s\n", n.node_id, peerID, address)
 		conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
-			fmt.Printf("[ERROR] Node %d failed to connect to Node %d: %v\n", n.node_id, peerID, err)
+			logPrint("[ERROR] Node %d failed to connect to Node %d: %v\n", n.node_id, peerID, err)
 			return err
 		}
 
 		client := proto.NewCsServiceClient(conn)
 		n.clients[peerID] = client
-		fmt.Printf("[DIAL] Node %d successfully connected to Node %d\n", n.node_id, peerID)
+		logPrint("[DIAL] Node %d successfully connected to Node %d\n", n.node_id, peerID)
 	}
-	fmt.Printf("[DIAL] Node %d finished dialing all peers\n", n.node_id)
+	logPrint("[DIAL] Node %d finished dialing all peers\n", n.node_id)
 	return nil
 }
 
@@ -134,7 +140,7 @@ func (n *Node) RequestCriticalSection() {
 
 	// Send to all other nodes
 	for peerID, client := range n.clients {
-		fmt.Printf("[REQUEST] Node %d requesting CS from Node %d, (Seq=%d)\n", n.node_id, peerID, ourSeq)
+		logPrint("[REQUEST] Node %d requesting CS from Node %d, (Seq=%d)\n", n.node_id, peerID, ourSeq)
 		resp, err := client.Request(context.Background(), &proto.NodeRequest{
 			NodeId: n.node_id,
 			SeqNr:  ourSeq,
@@ -145,11 +151,11 @@ func (n *Node) RequestCriticalSection() {
 		if err == nil && resp.PermissionGranted == true {
 			n.mu.Lock()
 			n.Outstanding_Reply_Count--
-			fmt.Printf("[REPLY] Node %d received REPLY from Node %d (Remaining=%d)\n",
+			logPrint("[REPLY] Node %d received REPLY from Node %d (Remaining=%d)\n",
 				n.node_id, peerID, n.Outstanding_Reply_Count)
 			n.mu.Unlock()
 		} else if err != nil {
-			fmt.Printf("[ERROR] Node %d request to Node %d failed: %v\n", n.node_id, peerID, err)
+			logPrint("[ERROR] Node %d request to Node %d failed: %v\n", n.node_id, peerID, err)
 		}
 	}
 
@@ -167,7 +173,7 @@ func (n *Node) RequestCriticalSection() {
 
 	if n.Outstanding_Reply_Count == 0 { // 2 is the max nr of replies (hardcoded)
 		// Enter CS (ONLY ONCE!)
-		fmt.Printf("[ENTER] Node %d entering Critical Section, (Seq=%d)\n", n.node_id, n.Our_Sequence_Number)
+		logPrint("[ENTER] Node %d entering Critical Section, (Seq=%d)\n", n.node_id, n.Our_Sequence_Number)
 		time.Sleep(1 * time.Second)
 		n.ReleaseCriticalSection() // release the critical section after accessing it
 	}
@@ -182,12 +188,12 @@ func (n *Node) ReleaseCriticalSection() {
 
 	for j := 1; j <= n.N; j++ {
 		if n.Reply_Deferred[j] {
-			fmt.Printf("[DEFERRED] Node %d sending REPLY to deferred Node %d\n", n.node_id, j)
+			logPrint("[DEFERRED] Node %d sending REPLY to deferred Node %d\n", n.node_id, j)
 			n.Reply_Deferred[j] = false
 			n.reply_channels[j] <- true
 		}
 	}
-	fmt.Printf("[RELEASE] Node %d released Critical Section\n", n.node_id)
+	logPrint("[RELEASE] Node %d released Critical Section\n", n.node_id)
 }
 
 // Request handles an incoming REQUEST message from another node.
@@ -195,7 +201,7 @@ func (n *Node) ReleaseCriticalSection() {
 // It decides whether to immediately grant permission
 // or defer the REPLY based on the Ricart-Agrawala conditions.
 func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.NodeResponse, error) {
-	fmt.Printf("[RECV] Node %d received REQUEST from Node %d, (Seq=%d)\n", n.node_id, req.NodeId, req.SeqNr)
+	logPrint("[RECV] Node %d received REQUEST from Node %d, (Seq=%d)\n", n.node_id, req.NodeId, req.SeqNr)
 
 	n.mu.Lock()
 	if req.SeqNr > int64(n.Highest_Sequence_Number) {
@@ -210,21 +216,21 @@ func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.Node
 		req.SeqNr < ourSeq && requesting ||
 		req.SeqNr == ourSeq && req.NodeId < ourID {
 		// reply OK
-		fmt.Printf("[GRANT] Node %d granting REPLY to Node %d immediately\n", n.node_id, req.NodeId)
+		logPrint("[GRANT] Node %d granting REPLY to Node %d immediately\n", n.node_id, req.NodeId)
 		return &proto.NodeResponse{
 			PermissionGranted: true,
 			NodeId:            n.node_id,
 			SeqNr:             req.SeqNr,
 		}, nil
 	} else {
-		fmt.Printf("[DEFER] Node %d deferring REPLY to Node %d\n", n.node_id, req.NodeId)
+		logPrint("[DEFER] Node %d deferring REPLY to Node %d\n", n.node_id, req.NodeId)
 		n.mu.Lock()
 		n.Reply_Deferred[req.NodeId] = true // defers the incoming requesting node
 		n.mu.Unlock()
 
 		<-n.reply_channels[int(req.NodeId)] // blocks until it receives a signal from requesting node
 
-		fmt.Printf("[SEND-DEFERRED] Node %d sending deferred REPLY to Node %d\n", n.node_id, req.NodeId)
+		logPrint("[SEND-DEFERRED] Node %d sending deferred REPLY to Node %d\n", n.node_id, req.NodeId)
 		return &proto.NodeResponse{
 			PermissionGranted: true,
 			NodeId:            n.node_id,
@@ -236,7 +242,7 @@ func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.Node
 var wg sync.WaitGroup
 
 func main() {
-	fmt.Println("[MAIN] Initializing nodes...")
+	logPrint("[MAIN] Initializing nodes...")
 	// Create 3 nodes
 	node1 := NewNode(1, 3, "localhost:5001")
 	node2 := NewNode(2, 3, "localhost:5002")
@@ -246,19 +252,19 @@ func main() {
 	node2_peers := map[int]string{1: "localhost:5001", 3: "localhost:5003"}
 	node3_peers := map[int]string{1: "localhost:5001", 2: "localhost:5002"}
 
-	fmt.Println("[MAIN] Starting all servers...")
+	logPrint("[MAIN] Starting all servers...")
 	node1.StartServer()
 	node2.StartServer()
 	node3.StartServer()
 
-	fmt.Println("[MAIN] Connecting all nodes...")
+	logPrint("[MAIN] Connecting all nodes...")
 	node1.DialOtherNodes(node1_peers)
 	node2.DialOtherNodes(node2_peers)
 	node3.DialOtherNodes(node3_peers)
 
 	time.Sleep(2 * time.Second)
-	fmt.Println("[MAIN] All servers started and connected.")
-	fmt.Println("=========================================\nRUNNING ALGORITHM\n=========================================")
+	logPrint("[MAIN] All servers started and connected.")
+	logPrint("=========================================\nRUNNING ALGORITHM\n=========================================")
 
 	var wg sync.WaitGroup
 	nr_of_times_entering_cs := 1 // change this to test longer logs
@@ -290,5 +296,5 @@ func main() {
 	}()
 
 	wg.Wait()
-	fmt.Println("[MAIN] All nodes completed their CS requests!")
+	logPrint("[MAIN] All nodes completed their CS requests!")
 }
