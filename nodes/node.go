@@ -47,7 +47,7 @@ func NewNode(id int64, N int, port string) *Node {
 		Highest_Sequence_Number:     0,
 		Outstanding_Reply_Count:     N - 1,
 		Requesting_Critical_Section: false,
-		Reply_Deferred:              make([]bool, N),
+		Reply_Deferred:              make([]bool, N+1),
 
 		port:           port,
 		server:         grpc.NewServer(),
@@ -55,7 +55,7 @@ func NewNode(id int64, N int, port string) *Node {
 		reply_channels: make(map[int]chan bool),
 	}
 	// Pre-create a channel for each possible node
-	for i := 1; i <= N; i++ {
+	for i := 1; i <= N-1; i++ {
 		if int64(i) != id { // Don't create for yourself
 			node.reply_channels[int(i)] = make(chan bool, 1) // buffered
 		}
@@ -114,39 +114,61 @@ func (n *Node) RequestCriticalSection() {
 	n.mu.Lock()
 	n.Requesting_Critical_Section = true
 	n.Outstanding_Reply_Count = n.N - 1
-	n.Our_Sequence_Number++
+	// CHANGE THESE TWO LINES:
+	n.Our_Sequence_Number = int64(n.Highest_Sequence_Number) + 1
+	n.Highest_Sequence_Number = int(n.Our_Sequence_Number)
+	ourSeq := n.Our_Sequence_Number // Save for use outside lock
 	n.mu.Unlock()
+
 	// Send to all other nodes
 	for peerID, client := range n.clients {
 		resp, err := client.Request(context.Background(), &proto.NodeRequest{
 			NodeId: n.node_id,
-			SeqNr:  n.Our_Sequence_Number,
+			SeqNr:  ourSeq,
 		})
-		fmt.Print("Node %s is Requesting CS from Node %s at Time %d", n.node_id, peerID, n.Our_Sequence_Number)
+		fmt.Printf("Node %d is Requesting CS from Node %d at Time %d\n", n.node_id, peerID, ourSeq)
 		if err == nil && resp.PermissionGranted == true {
-			n.Outstanding_Reply_Count-- // Got a reply!
+			n.mu.Lock()
+			n.Outstanding_Reply_Count--
+			n.mu.Unlock()
 		}
 	}
 
-	if n.Outstanding_Reply_Count == 0 { // 2 is the max nr of replies (hardcoded)
-		fmt.Printf("Node %s accessed the critical section", n.node_id) // write to txt file new line (not required)
-		time.Sleep(1000)
-		n.ReleaseCriticalSection() // release the critical section after accessing it
+	for {
+		n.mu.Lock()
+		count := n.Outstanding_Reply_Count
+		n.mu.Unlock()
+
+		if count == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+
+	// Now enter CS
+	fmt.Printf("Node %d accessed the critical section at time %d\n", n.node_id, n.Our_Sequence_Number)
+	time.Sleep(1 * time.Second)
+
+	// Release CS
+	n.ReleaseCriticalSection()
 }
 
 func (n *Node) ReleaseCriticalSection() {
 	n.Requesting_Critical_Section = false
-	for j := 1; j < n.N; j++ {
+	for j := 1; j < n.N-1; j++ {
 		if n.Reply_Deferred[j] {
 			n.Reply_Deferred[j] = false
 			n.reply_channels[j] <- true // send a reply to node j and release the critical sectiong
 		}
 	}
+	fmt.Printf("Node %d released the Critical Section\n", n.node_id)
 }
 
 func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.NodeResponse, error) {
 	n.mu.Lock()
+	if req.SeqNr > int64(n.Highest_Sequence_Number) {
+		n.Highest_Sequence_Number = int(req.SeqNr)
+	}
 	requesting := n.Requesting_Critical_Section
 	ourSeq := n.Our_Sequence_Number
 	ourID := n.node_id
@@ -174,5 +196,71 @@ func (n *Node) Request(ctx context.Context, req *proto.NodeRequest) (*proto.Node
 			SeqNr:             req.SeqNr,
 		}, nil
 	}
+}
 
+var wg sync.WaitGroup
+
+func main() {
+	// Create 3 nodes
+	node1 := NewNode(1, 3, "localhost:5001")
+	node2 := NewNode(2, 3, "localhost:5002")
+	node3 := NewNode(3, 3, "localhost:5003")
+	node1_peers := map[int]string{
+		2: "localhost:5002",
+		3: "localhost:5003",
+	}
+	node2_peers := map[int]string{
+		1: "localhost:5001",
+		3: "localhost:5003",
+	}
+	node3_peers := map[int]string{
+		1: "localhost:5001",
+		2: "localhost:5002",
+	}
+	// Start all servers
+	node1.StartServer()
+	node2.StartServer()
+	node3.StartServer()
+
+	// Connect them to each other
+	node1.DialOtherNodes(node1_peers)
+	node2.DialOtherNodes(node2_peers)
+	node3.DialOtherNodes(node3_peers)
+
+	time.Sleep(2 * time.Second)
+
+	wg.Add(1)
+	// Make each node request CS 3 times (how?)
+	// Make each node request CS 3 times concurrently
+	go func() {
+		for i := 0; i < 3; i++ {
+			// Node 1 requests
+			// Maybe add a small delay between requests?
+			node1.RequestCriticalSection()
+			time.Sleep(time.Second * 2)
+		}
+	}()
+	wg.Done()
+	wg.Add(1)
+	go func() {
+		for i := 0; i < 3; i++ {
+			// Node 2 requests
+			node2.RequestCriticalSection()
+			time.Sleep(time.Second * 2)
+		}
+	}()
+	wg.Done()
+	wg.Add(1)
+	go func() {
+		for i := 0; i < 3; i++ {
+			// Node 3 requests
+			node3.RequestCriticalSection()
+			time.Sleep(time.Second * 2)
+		}
+	}()
+	wg.Done()
+	wg.Wait()
+
+	// Keep program running
+	select {}
 }
