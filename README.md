@@ -1,8 +1,8 @@
-# Implementation of Ricart-Argawala
+# Implementation of Ricart-Agrawala
 
 ## Description
 
-You are required to implement distributed mutual exclusion among nodes in a distributed system. Your implementation must use the Ricart-Argawala algorithm discussed during the lectures.
+You are required to implement distributed mutual exclusion among nodes in a distributed system. Your implementation must use the Ricart-Agrawala algorithm discussed during the lectures.
 
 ## System Requirements
 
